@@ -20,4 +20,9 @@ urlpatterns = [
     # User management
     path('users/create/', views.UserCreate.as_view(), name='user_create'),
     path('users/me/', views.UserDetail.as_view(), name='user_detail'),
+    
+    # Conversion endpoints
+    path('conversions/convert/', views.convert_meters_to_feet, name='convert_meters_to_feet'),
+    path('conversions/history/', views.conversion_history, name='conversion_history'),
+    path('conversions/stats/', views.conversion_stats, name='conversion_stats'),
 ] 

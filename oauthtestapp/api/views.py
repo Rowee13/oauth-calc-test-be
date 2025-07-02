@@ -14,9 +14,12 @@ from allauth.socialaccount.models import SocialAccount, SocialToken
 from allauth.socialaccount.providers.google.views import GoogleOAuth2Adapter
 from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 from .serializers import UserSerializer, UserProfileSerializer
+from .serializers import ConversionInputSerializer, ConversionSerializer, ConversionResponseSerializer
+from .models import Conversion
 import json
 import requests
 import urllib.parse
+from decimal import Decimal
 
 User = get_user_model()
 
@@ -352,6 +355,158 @@ def validate_google_token(request):
         except json.JSONDecodeError:
             return JsonResponse({"detail": "Invalid JSON"}, status=400)
     return JsonResponse({"detail": "Invalid request method"}, status=405)
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def convert_meters_to_feet(request):
+    """
+    Convert meters to feet and save the conversion history.
+    POST /api/conversions/convert/
+    Body: {"meters": 10.5}
+    """
+    try:
+        # Validate input
+        input_serializer = ConversionInputSerializer(data=request.data)
+        if not input_serializer.is_valid():
+            return Response({
+                "error": "Invalid input",
+                "details": input_serializer.errors
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        meters_value = input_serializer.validated_data['meters']
+        
+        # Conversion formula: feet = meters * 3.28084
+        feet_value = meters_value * Decimal('3.28084')
+        feet_value = feet_value.quantize(Decimal('0.000001'))  # Round to 6 decimal places
+        
+        # Get user's IP address
+        def get_client_ip(request):
+            x_forwarded_for = request.META.get('HTTP_X_FORWARDED_FOR')
+            if x_forwarded_for:
+                ip = x_forwarded_for.split(',')[0]
+            else:
+                ip = request.META.get('REMOTE_ADDR')
+            return ip
+        
+        # Save conversion to database
+        conversion = Conversion.objects.create(
+            user=request.user,
+            meters_value=meters_value,
+            feet_value=feet_value,
+            ip_address=get_client_ip(request)
+        )
+        
+        # Prepare response
+        response_data = {
+            "meters": meters_value,
+            "feet": feet_value,
+            "conversion_id": conversion.id,
+            "timestamp": conversion.timestamp,
+            "formula_used": "feet = meters × 3.28084",
+            "message": f"Successfully converted {meters_value} meters to {feet_value} feet"
+        }
+        
+        response_serializer = ConversionResponseSerializer(response_data)
+        return Response(response_serializer.data, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({
+            "error": "Conversion failed",
+            "details": str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def conversion_history(request):
+    """
+    Get conversion history for the authenticated user.
+    GET /api/conversions/history/
+    Optional query params: ?limit=10&offset=0
+    """
+    try:
+        # Get user's conversions
+        conversions = Conversion.objects.filter(user=request.user)
+        
+        # Pagination
+        limit = request.GET.get('limit', 50)
+        offset = request.GET.get('offset', 0)
+        
+        try:
+            limit = int(limit)
+            offset = int(offset)
+        except ValueError:
+            limit = 50
+            offset = 0
+        
+        # Apply pagination
+        total_count = conversions.count()
+        conversions = conversions[offset:offset + limit]
+        
+        # Serialize data
+        serializer = ConversionSerializer(conversions, many=True)
+        
+        return Response({
+            "conversions": serializer.data,
+            "pagination": {
+                "total_count": total_count,
+                "limit": limit,
+                "offset": offset,
+                "has_next": offset + limit < total_count,
+                "has_previous": offset > 0
+            },
+            "message": f"Retrieved {len(serializer.data)} conversion(s) for user {request.user.username}"
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({
+            "error": "Failed to retrieve conversion history",
+            "details": str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def conversion_stats(request):
+    """
+    Get conversion statistics for the authenticated user.
+    GET /api/conversions/stats/
+    """
+    try:
+        conversions = Conversion.objects.filter(user=request.user)
+        
+        if not conversions.exists():
+            return Response({
+                "total_conversions": 0,
+                "message": "No conversions found for this user"
+            }, status=status.HTTP_200_OK)
+        
+        # Calculate statistics
+        total_conversions = conversions.count()
+        total_meters_converted = sum(c.meters_value for c in conversions)
+        total_feet_converted = sum(c.feet_value for c in conversions)
+        avg_meters_per_conversion = total_meters_converted / total_conversions
+        avg_feet_per_conversion = total_feet_converted / total_conversions
+        
+        latest_conversion = conversions.first()  # Most recent due to ordering
+        
+        return Response({
+            "total_conversions": total_conversions,
+            "total_meters_converted": float(total_meters_converted),
+            "total_feet_converted": float(total_feet_converted),
+            "average_meters_per_conversion": float(avg_meters_per_conversion),
+            "average_feet_per_conversion": float(avg_feet_per_conversion),
+            "latest_conversion": {
+                "meters": float(latest_conversion.meters_value),
+                "feet": float(latest_conversion.feet_value),
+                "timestamp": latest_conversion.timestamp
+            } if latest_conversion else None,
+            "user": request.user.username
+        }, status=status.HTTP_200_OK)
+        
+    except Exception as e:
+        return Response({
+            "error": "Failed to retrieve conversion statistics",
+            "details": str(e)
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([AllowAny])
