@@ -352,3 +352,19 @@ def validate_google_token(request):
         except json.JSONDecodeError:
             return JsonResponse({"detail": "Invalid JSON"}, status=400)
     return JsonResponse({"detail": "Invalid request method"}, status=405)
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def health_check(request):
+    """
+    Simple health check endpoint
+    """
+    return JsonResponse({
+        "status": "ok",
+        "host": request.get_host(),
+        "secure": request.is_secure(),
+        "debug": settings.DEBUG,
+        "allowed_hosts": settings.ALLOWED_HOSTS,
+        "path": request.path,
+        "method": request.method,
+    })

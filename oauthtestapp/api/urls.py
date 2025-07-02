@@ -2,6 +2,9 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
+    # Health check
+    path('health/', views.health_check, name='health_check'),
+    
     # Debug endpoint
     path('auth/debug/', views.oauth_config_debug, name='oauth_config_debug'),  # Debug OAuth config
     
