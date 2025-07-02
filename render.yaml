@@ -1,0 +1,16 @@
+services:
+    - type: web
+      name: django-oauth-api
+      runtime: python
+      buildCommand: "./build.sh"
+      startCommand: "gunicorn oauthtestapp.wsgi:application"
+      envVars:
+          - key: DEBUG
+            value: "False"
+          - key: SECRET_KEY
+            generateValue: true
+          - key: ALLOWED_HOSTS
+            value: ".onrender.com"
+          - key: FRONTEND_URL
+            value: "https://your-frontend-domain.com"
+      autoDeploy: true
