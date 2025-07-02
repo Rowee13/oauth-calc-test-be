@@ -16,6 +16,7 @@ from allauth.socialaccount.providers.oauth2.client import OAuth2Client
 from .serializers import UserSerializer, UserProfileSerializer
 import json
 import requests
+import urllib.parse
 
 User = get_user_model()
 
@@ -32,12 +33,67 @@ class UserDetail(generics.RetrieveUpdateAPIView):
     def get_object(self):
         return self.request.user
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def oauth_config_debug(request):
+    """
+    Debug endpoint to show current OAuth configuration.
+    Visit this to check if your settings are correct.
+    """
+    return JsonResponse({
+        "google_client_id": settings.GOOGLE_OAUTH_CLIENT_ID[:20] + "..." if settings.GOOGLE_OAUTH_CLIENT_ID else "NOT SET",
+        "google_client_secret": "SET" if settings.GOOGLE_OAUTH_CLIENT_SECRET else "NOT SET",
+        "redirect_uri": settings.GOOGLE_OAUTH_REDIRECT_URI,
+        "frontend_url": settings.FRONTEND_URL,
+        "current_host": request.get_host(),
+        "protocol": "https" if request.is_secure() else "http",
+        "full_callback_url": f"{'https' if request.is_secure() else 'http'}://{request.get_host()}/api/auth/google/callback/",
+        "instructions": {
+            "1": "Add this redirect URI to Google Cloud Console:",
+            "redirect_uri_for_google": settings.GOOGLE_OAUTH_REDIRECT_URI,
+            "2": "Make sure your .env file has these variables set",
+            "3": "Frontend should redirect to: /api/auth/google/login/"
+        }
+    })
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def google_oauth_initiate(request):
+    """
+    Initiate Google OAuth flow - redirects to Google's authorization server.
+    This is what your frontend should redirect to, not the /auth/google/ endpoint.
+    """
+    google_client_id = settings.GOOGLE_OAUTH_CLIENT_ID
+    
+    if not google_client_id:
+        return JsonResponse({
+            "error": "Google OAuth not configured. Please set GOOGLE_OAUTH_CLIENT_ID in environment."
+        }, status=500)
+    
+    # Get redirect URI from settings (configurable)
+    redirect_uri = settings.GOOGLE_OAUTH_REDIRECT_URI
+    
+    # Google OAuth 2.0 authorization URL
+    base_url = "https://accounts.google.com/o/oauth2/v2/auth"
+    params = {
+        'client_id': google_client_id,
+        'redirect_uri': redirect_uri,
+        'scope': 'email profile',
+        'response_type': 'code',
+        'access_type': 'online',
+        'prompt': 'select_account'
+    }
+    
+    auth_url = f"{base_url}?{urllib.parse.urlencode(params)}"
+    return redirect(auth_url)
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def google_oauth_login(request):
     """
-    Handle Google OAuth login.
-    Expects: { "access_token": "google_access_token" }
+    Handle Google OAuth login from frontend.
+    This endpoint receives Google access token from your NextJS app.
+    Expects: { "access_token": "google_access_token_from_frontend" }
     Returns: { "access_token": "jwt_token", "refresh_token": "refresh_token", "user": {...} }
     """
     try:
@@ -46,7 +102,8 @@ def google_oauth_login(request):
         
         if not google_access_token:
             return JsonResponse({
-                "error": "Google access token is required"
+                "error": "Google access token is required",
+                "help": "Your frontend should get this token from Google OAuth and send it here"
             }, status=status.HTTP_400_BAD_REQUEST)
         
         # Verify Google token and get user info
@@ -201,6 +258,63 @@ def get_or_create_user_from_google(google_user_info):
         
     except Exception:
         return None
+
+# Google OAuth callback (handles redirect from Google)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def google_oauth_callback(request):
+    """
+    Handle callback from Google OAuth.
+    This receives the authorization code and exchanges it for tokens.
+    """
+    code = request.GET.get('code')
+    
+    if not code:
+        error = request.GET.get('error', 'Unknown error')
+        frontend_url = settings.FRONTEND_URL
+        return redirect(f'{frontend_url}/auth/callback?error={error}')
+    
+    try:
+        # Exchange code for access token
+        token_url = "https://oauth2.googleapis.com/token"
+        token_data = {
+            'client_id': settings.GOOGLE_OAUTH_CLIENT_ID,
+            'client_secret': settings.GOOGLE_OAUTH_CLIENT_SECRET,
+            'code': code,
+            'grant_type': 'authorization_code',
+            'redirect_uri': settings.GOOGLE_OAUTH_REDIRECT_URI,
+        }
+        
+        token_response = requests.post(token_url, data=token_data)
+        token_json = token_response.json()
+        
+        if 'access_token' not in token_json:
+            frontend_url = settings.FRONTEND_URL
+            return redirect(f'{frontend_url}/auth/callback?error=token_exchange_failed')
+        
+        # Get user info
+        google_user_info = get_google_user_info(token_json['access_token'])
+        if not google_user_info:
+            frontend_url = settings.FRONTEND_URL
+            return redirect(f'{frontend_url}/auth/callback?error=user_info_failed')
+        
+        # Create/get user
+        user = get_or_create_user_from_google(google_user_info)
+        if not user:
+            frontend_url = settings.FRONTEND_URL
+            return redirect(f'{frontend_url}/auth/callback?error=user_creation_failed')
+        
+        # Generate JWT tokens
+        refresh = RefreshToken.for_user(user)
+        access_token = str(refresh.access_token)
+        
+        # Redirect to frontend with token
+        frontend_url = settings.FRONTEND_URL
+        return redirect(f'{frontend_url}/auth/callback?access_token={access_token}')
+        
+    except Exception as e:
+        frontend_url = settings.FRONTEND_URL
+        return redirect(f'{frontend_url}/auth/callback?error=authentication_failed')
 
 # Legacy redirect view for allauth (if needed)
 @login_required

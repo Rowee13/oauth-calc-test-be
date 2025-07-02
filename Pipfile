@@ -11,6 +11,9 @@ django-cors-headers = "*"
 djangorestframework-simplejwt = {extras = ["blacklist"], version = "*"}
 requests = "*"
 cryptography = "*"
+dotenv = "*"
+whitenoise = "*"
+python-dotenv = "*"
 
 [dev-packages]
 
