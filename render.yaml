@@ -3,7 +3,7 @@ services:
       name: django-oauth-api
       runtime: python
       buildCommand: "./build.sh"
-      startCommand: "gunicorn oauthtestapp.wsgi:application"
+      startCommand: "cd oauthtestapp && gunicorn oauthtestapp.wsgi:application"
       envVars:
           - key: DEBUG
             value: "False"
