@@ -12,5 +12,26 @@ services:
           - key: ALLOWED_HOSTS
             value: ".onrender.com"
           - key: FRONTEND_URL
-            value: "https://your-frontend-domain.com"
+            value: "https://oauth-calc-test-app.vercel.app"
+          - key: DATABASE_URL
+            fromDatabase:
+                name: django-test-postgres
+                property: connectionString
+          - key: GOOGLE_OAUTH_CLIENT_ID
+            sync: false
+          - key: GOOGLE_OAUTH_CLIENT_SECRET
+            sync: false
+          - key: GOOGLE_OAUTH_REDIRECT_URI
+            sync: false
       autoDeploy: true
+
+databases:
+    - name: django-test-postgres
+      databaseName: django_test_postgres
+      user: django_test_postgres_user
+      plan: free
+      region: oregon
+      ipAllowList:
+          - source: 0.0.0.0/0
+            description: everywhere
+      postgresMajorVersion: "16"

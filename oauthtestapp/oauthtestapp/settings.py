@@ -108,13 +108,27 @@ DATABASES = {
     }
 }
 
-if not DEBUG:
-    # Production database (PostgreSQL on Render)
+# Database configuration for production
+DATABASE_URL = os.environ.get('DATABASE_URL')
+if DATABASE_URL:
     try:
         import dj_database_url  # type: ignore
-        DATABASES['default'] = dj_database_url.parse(os.environ.get('DATABASE_URL'))
-    except ImportError:
-        pass  # Will use default SQLite in development
+        parsed_db = dj_database_url.parse(DATABASE_URL)
+        DATABASES['default'] = parsed_db
+    except (ImportError, ValueError, Exception) as e:
+        # Log the error for debugging
+        print(f"Database URL parsing error: {e}")
+        print(f"DATABASE_URL value: {DATABASE_URL}")
+        # Fallback to SQLite for now (not ideal for production)
+        if not DEBUG:
+            # In production, this should be addressed
+            raise Exception(f"Failed to parse DATABASE_URL: {e}")
+else:
+    # No DATABASE_URL provided, use SQLite (development only)
+    if not DEBUG:
+        print("WARNING: No DATABASE_URL provided in production environment")
+        # Uncomment the next line to force an error in production
+        # raise Exception("DATABASE_URL is required in production")
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
